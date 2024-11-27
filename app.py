@@ -1,94 +1,105 @@
-import os
-import requests
 import streamlit as st
-from streamlit_chat import message  # For chat UI
-from dotenv import load_dotenv
+import requests
+from streamlit_chat import message as st_message  # Rename to avoid conflict with 'message'
 
-# Load environment variables
-load_dotenv()
+# Backend URL
+BASE_URL = "https://e841-2405-201-300b-71c3-80a1-ae26-5f29-adda.ngrok-free.app"  # Replace with your FastAPI backend URL if different
 
-# Backend API Base URL
-API_BASE_URL = "https://e841-2405-201-300b-71c3-80a1-ae26-5f29-adda.ngrok-free.app"
+# Constants
+ROLE = "HR"
+USER_ID = "1"
 
-st.set_page_config(
-    page_title="AI Document Assistant",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+def get_ai_response(user_query):
+    """
+    Sends a user query to the backend and fetches the AI's response.
+    """
+    query_model = {"query": user_query}
 
-# Helper Functions
-def api_request(endpoint, method="GET", **kwargs):
-    url = f"{API_BASE_URL}{endpoint}"
     try:
-        if method == "GET":
-            response = requests.get(url, **kwargs)
-        elif method == "POST":
-            response = requests.post(url, **kwargs)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"API error: {str(e)}")
-        return None
+        response = requests.post(
+            f"{BASE_URL}/get-response/?user_id={USER_ID}",
+            json={
+                "query_model": query_model,
+                "current_user_roles": [ROLE],
+                "user_id": USER_ID,
+            },
+        )
+        response_data = response.json()
+        return response_data.get("response", "No response from the server.")
+    except Exception as e:
+        return f"Error communicating with the server: {e}"
 
-# App Sections
-st.title("📄 AI Document Assistant")
-
-# Tabs for Navigation
-tab1, tab2 = st.tabs(["File Loader", "Chat Interface"])
-
-# Tab 1: File Loader
-with tab1:
-    st.header("📂 Load File and Set Roles")
-    uploaded_file = st.file_uploader("Upload your document:", type=["txt", "pdf", "docx"])
-    roles_input = st.text_input("Enter roles (comma-separated):")
-    # print(roles_input)
-    if st.button("Process File"):
-        if uploaded_file and roles_input:
-            with st.spinner("Processing file..."):
-                files = {"file": uploaded_file}
-                data = {"roles": roles_input.split(",")}
-                response = api_request("/load-file/", method="POST", files=files, data=data)
-                if response:
-                    st.success(response["message"])
-        else:
-            st.warning("Please upload a file and provide roles.")
-
-# Tab 2: Chat Interface
-with tab2:
-    st.header("💬 Chat with AI")
-    user_id = st.text_input("Enter your User ID:", key="user_id")
-    user_query = st.text_area("Your Query:")
-    chat_history = st.container()
-
-    if st.button("Send Query"):
-        if user_id and user_query:
-            with st.spinner("Fetching response..."):
-                query_model = {"query": user_query}
-                roles = [roles_input]  # Replace with actual roles for the user
-                payload = {"query_model": query_model, "current_user_roles": roles, "user_id": user_id}
-                response = api_request("/get-response/?user_id={user_id}", method="POST", json=payload)
-                if response:
-                    if "response" in response:
-                        st.session_state.chat_history.append({"role": "user", "content": user_query})
-                        st.session_state.chat_history.append({"role": "assistant", "content": response["response"]})
-        else:
-            st.warning("Please provide a User ID and a query.")
-
-    if st.button("Clear Chat History"):
-        if user_id:
-            with st.spinner("Clearing chat history..."):
-                response = api_request("/new-chat/?user_id={user_id}", method="POST", json={"user_id": user_id})
-                if response:
-                    st.success(response["message"])
-                    st.session_state.chat_history = []
-
-    # Display Chat History
-    if "chat_history" not in st.session_state:
+def clear_chat_history():
+    """
+    Sends a request to clear chat history for the user.
+    """
+    try:
+        response = requests.post(f"{BASE_URL}/new-chat/?user_id={USER_ID}", json={"user_id": USER_ID})
+        response_data = response.json()
         st.session_state.chat_history = []
+        return response_data.get("message", "Error clearing history.")
+    except Exception as e:
+        return f"Error communicating with the server: {e}"
 
-    with chat_history:
-        for msg in st.session_state.chat_history:
-            role = msg["role"]
-            content = msg["content"]
-            message(content, is_user=(role == "user"))
+import uuid
+
+# Display Chat History
+def display_chat():
+    """
+    Displays the chat history dynamically in the app.
+    """
+    chat_placeholder.empty()  # Clear the placeholder
+    with chat_placeholder.container():
+        for idx, chat in enumerate(st.session_state.chat_history):
+            # Use role, idx, and a UUID for a unique key
+            unique_key = f"{chat['role']}_{idx}_{uuid.uuid4()}"
+            
+            # Display user message
+            if chat["role"] == "user":
+                st_message(chat["content"], is_user=True, key=unique_key)
+            # Display assistant message
+            else:
+                st_message(chat["content"], is_user=False, key=unique_key)
+
+
+# Streamlit UI setup
+st.set_page_config(page_title="Chat Assistant")
+st.markdown("<h1 style='text-align: center;'>HR Chat Assistant</h1>", unsafe_allow_html=True)
+
+# Sidebar for options
+with st.sidebar:
+    st.header("Options")
+    if st.button("Clear Chat History"):
+        clear_message = clear_chat_history()
+        st.success(clear_message)
+
+# Initialize chat history in session state
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# Placeholder for chat interface
+chat_placeholder = st.empty()
+
+# Display chat messages
+display_chat()
+
+# Divider to separate chat interface and input field
+st.divider()
+
+# Chat Input and Send Button
+with st.container():
+    user_input = st.text_input("Type your message here:", key="user_input", placeholder="Ask anything...")
+    send_clicked = st.button("Send", key="send_button")
+
+# Process the message when the "Send" button is clicked
+if send_clicked and user_input.strip():
+    # Add user input to chat history
+    st.session_state.chat_history.append({"role": "user", "content": user_input})
+
+    # Get AI response
+    ai_response = get_ai_response(user_input)
+    st.session_state.chat_history.append({"role": "assistant", "content": ai_response})
+
+    # Refresh chat interface
+    display_chat()
 
